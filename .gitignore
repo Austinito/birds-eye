@@ -1,0 +1,57 @@
+# ==========================================
+# Birds Eye - Git ignore
+# ==========================================
+
+# --- OS / editor ---
+.DS_Store
+.DS_Store?
+.Spotlight-V100
+.Trashes
+Thumbs.db
+
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- Logs ---
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# --- Environment files ---
+.env
+.env.*
+!.env.example
+
+# --- Node / package managers ---
+node_modules/
+**/node_modules/
+.pnp.*
+
+# --- Build output ---
+dist/
+**/dist/
+build/
+**/build/
+out/
+**/out/
+
+# --- Tool caches ---
+.vite/
+**/.vite/
+.turbo/
+**/.turbo/
+.cache/
+**/.cache/
+coverage/
+**/coverage/
+*.tsbuildinfo
+
+# --- Temporary / misc ---
+*.tmp
+*.temp
+*.bak

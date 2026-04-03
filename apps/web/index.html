@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/png" href="/birds-eye-sketch.png" />
+    <script>
+      (function () {
+        const hasStored = localStorage.getItem('birds-eye-theme')
+        if (hasStored === 'light' || hasStored === 'dark') {
+          document.documentElement.dataset.theme = hasStored
+          document.documentElement.style.colorScheme = hasStored
+          return
+        }
+
+        const systemTheme = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+        localStorage.setItem('birds-eye-theme', systemTheme)
+        document.documentElement.dataset.theme = systemTheme
+        document.documentElement.style.colorScheme = systemTheme
+      })()
+    </script>
+    <title>Bird's Eye</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,17 @@
+{
+  "name": "birds-eye",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -k \"npm run dev -w @birds-eye/server\" \"npm run dev -w @birds-eye/web\"",
+    "build": "npm run build -w @birds-eye/web",
+    "start": "npm run start -w @birds-eye/server",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
