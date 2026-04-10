@@ -55,3 +55,6 @@ coverage/
 *.tmp
 *.temp
 *.bak
+
+# --- Local source assets not shipped with app ---
+Bird's Eye Sketch.png

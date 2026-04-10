@@ -289,6 +289,25 @@ function ArrowRightPath() {
   )
 }
 
+function ImagePath() {
+  return (
+    <>
+      <rect x="4" y="6" width="16" height="12" rx="2" fill="none" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M8 14l2.2-2.3a1.6 1.6 0 0 1 2.3 0L17 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="9" cy="10" r="1" fill="currentColor" />
+    </>
+  )
+}
+
+function XPath() {
+  return (
+    <>
+      <path d="M7 7l10 10" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
+      <path d="M17 7 7 17" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
+    </>
+  )
+}
+
 export const UserIcon = makeIcon(UserPath)
 export const AgentIcon = makeIcon(AgentPath)
 export const SystemIcon = makeIcon(SystemPath)
@@ -306,3 +325,5 @@ export const SunIcon = makeIcon(SunPath)
 export const MoonIcon = makeIcon(MoonPath)
 export const GearIcon = makeIcon(GearPath)
 export const ArrowRightIcon = makeIcon(ArrowRightPath)
+export const ImageIcon = makeIcon(ImagePath)
+export const XIcon = makeIcon(XPath)

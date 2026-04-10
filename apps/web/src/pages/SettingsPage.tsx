@@ -22,6 +22,11 @@ function normalizeThinkingSelection(value: string): ThinkingLevel | undefined {
 }
 
 export function SettingsPage() {
+  useEffect(() => {
+    if (typeof document === 'undefined') return
+    document.title = "Settings - Bird's Eye"
+  }, [])
+
   const navigate = useNavigate()
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)

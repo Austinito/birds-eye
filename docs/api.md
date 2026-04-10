@@ -391,3 +391,19 @@ Returns:
 ```json
 { "ok": true }
 ```
+
+### POST `/api/workspaces/:workspaceId/sessions/archive`
+
+Archives multiple sessions.
+
+Body:
+
+```json
+{ "viewerIds": ["...", "..."] }
+```
+
+Returns:
+
+```json
+{ "ok": true, "archived": ["..."], "errors": [{ "viewerId": "...", "error": "..." }] }
+```

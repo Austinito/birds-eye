@@ -3,6 +3,7 @@ import { stat } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { BIRDSEYE_WORKSPACES_PATH, defaultWorkspaceNameFromPath, ensureBirdseyeHome } from './config.js'
+import { deleteWorkspaceIcon, getWorkspaceIconMeta } from './workspace-icons.js'
 import type { WorkspaceRecord } from './types.js'
 
 interface PersistedWorkspaceRecord {
@@ -35,9 +36,13 @@ function writeRegistry(records: PersistedWorkspaceRecord[]): void {
 }
 
 async function toWorkspaceRecord(record: PersistedWorkspaceRecord): Promise<WorkspaceRecord> {
+  const iconMeta = await getWorkspaceIconMeta(record.id)
+
   return {
     ...record,
     exists: existsSync(record.path),
+    iconUrl: iconMeta ? `/api/workspaces/${record.id}/icon` : undefined,
+    iconUpdatedAt: iconMeta?.updatedAt,
   }
 }
 
@@ -100,6 +105,7 @@ export async function deleteWorkspace(id: string): Promise<boolean> {
   }
 
   writeRegistry(next)
+  deleteWorkspaceIcon(id)
   return true
 }
 

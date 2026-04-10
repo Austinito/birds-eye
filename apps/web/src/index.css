@@ -264,6 +264,18 @@ ul {
   color: var(--muted);
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
 .section-header {
   display: flex;
   justify-content: space-between;
@@ -691,6 +703,42 @@ ul {
   min-width: 0;
 }
 
+.workspace-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.workspace-title-icon {
+  width: 26px;
+  height: 26px;
+  object-fit: cover;
+  border-radius: 9px;
+  box-shadow: 0 6px 16px rgba(191, 227, 255, 0.18);
+  flex: 0 0 auto;
+}
+
+.workspace-title-fallback {
+  width: 26px;
+  height: 26px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  color: white;
+  font-weight: 800;
+  font-size: 0.72rem;
+  box-shadow: 0 6px 16px rgba(191, 227, 255, 0.18);
+  flex: 0 0 auto;
+}
+
+.workspace-title-wrap h1 {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .workspace-summary-bar h1 {
   font-size: 1.2rem;
 }
@@ -706,8 +754,11 @@ ul {
 }
 
 .workspace-content {
+  --session-list-width: 360px;
+  --session-list-resizer-width: 10px;
+
   display: grid;
-  grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
+  grid-template-columns: var(--session-list-width) var(--session-list-resizer-width) minmax(0, 1fr);
   gap: 0;
   height: calc(100vh - 78px);
   min-height: 0;
@@ -722,6 +773,43 @@ ul {
 
 .session-list-panel.card {
   border-right-width: 0;
+}
+
+.session-viewer-panel.card {
+  border-left-width: 0;
+}
+
+.session-list-resizer {
+  width: var(--session-list-resizer-width);
+  cursor: col-resize;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-top-width: 1px;
+  border-bottom-width: 1px;
+  position: relative;
+  z-index: 2;
+  touch-action: none;
+}
+
+.session-list-resizer::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 2px;
+  height: 48px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.session-list-resizer:hover::after {
+  background: color-mix(in srgb, var(--accent-strong) 70%, transparent);
+}
+
+body.is-session-list-resizing {
+  cursor: col-resize;
+  user-select: none;
 }
 
 .section-header.sticky-header {
@@ -809,6 +897,18 @@ ul {
   position: relative;
   z-index: 1;
   box-shadow: inset 0 0 0 1px var(--rail-pill-ring);
+  overflow: hidden;
+}
+
+.rail-pill-has-icon {
+  background: transparent;
+}
+
+.rail-pill-icon {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 .rail-pill-active {
@@ -858,6 +958,26 @@ ul {
   padding: 0 8px;
 }
 
+.session-list-header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.session-list-hint {
+  font-size: 0.82rem;
+  margin-top: 2px;
+}
+
+.session-list-bulk-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .session-card,
 .session-add-card {
   width: 100%;
@@ -895,6 +1015,15 @@ ul {
   background: color-mix(in srgb, var(--accent) 4%, transparent);
 }
 
+.session-card-selected {
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
+}
+
+.session-card-selected.session-card-active {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+
 :root[data-theme='dark'] .session-card:hover {
   border-color: color-mix(in srgb, #60a5fa 22%, var(--border));
   background: color-mix(in srgb, #60a5fa 10%, var(--panel));
@@ -914,7 +1043,31 @@ ul {
 }
 
 .session-card-topline strong {
+  flex: 1;
+  min-width: 0;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-card-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.session-card-archive-inline {
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+
+.session-card:hover .session-card-archive-inline,
+.session-card:focus-visible .session-card-archive-inline {
+  opacity: 1;
+}
+
+.session-card-archive-inline:disabled {
+  opacity: 0.35;
 }
 
 .session-live-indicator {
@@ -1586,6 +1739,85 @@ kbd {
   margin: 0;
   font-size: 0.9rem;
   line-height: 1.45;
+  word-break: break-word;
+}
+
+/* Markdown rendering within session entries */
+.session-entry-body-markdown p {
+  margin: 0 0 0.65em;
+}
+
+.session-entry-body-markdown p:last-child {
+  margin-bottom: 0;
+}
+
+.session-entry-body-markdown ul,
+.session-entry-body-markdown ol {
+  margin: 0 0 0.65em;
+  padding-left: 1.4em;
+}
+
+.session-entry-body-markdown li {
+  margin: 0.2em 0;
+}
+
+.session-entry-body-markdown blockquote {
+  margin: 0 0 0.65em;
+  padding-left: 12px;
+  border-left: 3px solid var(--border);
+  color: var(--muted);
+}
+
+.session-entry-body-markdown code {
+  font-family: 'SFMono-Regular', SFMono-Regular, ui-monospace, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.92em;
+  padding: 0.15em 0.35em;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel-muted) 65%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+}
+
+.session-entry-body-markdown pre {
+  margin: 0 0 0.65em;
+  padding: 10px 12px;
+  border-radius: 14px;
+  overflow: auto;
+  background: color-mix(in srgb, var(--panel-muted) 80%, transparent);
+  border: 1px solid var(--border);
+}
+
+.session-entry-body-markdown pre code {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.session-entry-body-markdown a {
+  color: var(--accent-strong);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.session-entry-body-markdown table {
+  border-collapse: collapse;
+  margin: 0 0 0.65em;
+  width: max-content;
+  max-width: 100%;
+}
+
+.session-entry-body-markdown th,
+.session-entry-body-markdown td {
+  border: 1px solid var(--border);
+  padding: 6px 8px;
+}
+
+/* Tool outputs often contain JSON/logs; keep them in a plain preformatted block. */
+.session-entry-body-plain {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: 'SFMono-Regular', SFMono-Regular, ui-monospace, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.9rem;
+  line-height: 1.45;
 }
 
 .session-entry-body-collapsed {
@@ -1656,6 +1888,18 @@ kbd {
   .home-grid,
   .workspace-content {
     grid-template-columns: 1fr;
+  }
+
+  .session-list-resizer {
+    display: none;
+  }
+
+  .session-list-panel.card {
+    border-right-width: 1px;
+  }
+
+  .session-viewer-panel.card {
+    border-left-width: 1px;
   }
 
   .workspace-main {

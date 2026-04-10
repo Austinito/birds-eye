@@ -8,6 +8,11 @@ import { ThemeToggle } from '../components/ThemeToggle'
 import type { BirdseyeSettings, PiMigrationStatus, Workspace } from '../types'
 
 export function HomePage() {
+  useEffect(() => {
+    if (typeof document === 'undefined') return
+    document.title = "Bird's Eye"
+  }, [])
+
   const navigate = useNavigate()
   const [migrationStatus, setMigrationStatus] = useState<PiMigrationStatus | null>(null)
   const [workspaces, setWorkspaces] = useState<Workspace[]>([])

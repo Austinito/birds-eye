@@ -19,6 +19,10 @@ export interface Workspace {
   createdAt: string
   lastOpenedAt?: string
   exists: boolean
+  /** When present, a user-provided workspace icon is available at this URL. */
+  iconUrl?: string
+  /** Used for cache-busting workspace icon requests. */
+  iconUpdatedAt?: string
 }
 
 export type PiMigrationState = 'pending' | 'migrated' | 'skipped' | 'not_needed'

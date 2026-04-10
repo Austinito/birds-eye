@@ -213,4 +213,29 @@ export const api = {
       method: 'POST',
     }).then((response) => parseJson<{ ok: true }>(response))
   },
+
+  archiveSessions(
+    workspaceId: string,
+    viewerIds: string[],
+  ): Promise<{ ok: true; archived: string[]; errors: Array<{ viewerId: string; error: string }> }> {
+    return fetch(`/api/workspaces/${workspaceId}/sessions/archive`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ viewerIds }),
+    }).then((response) => parseJson<{ ok: true; archived: string[]; errors: Array<{ viewerId: string; error: string }> }>(response))
+  },
+
+  saveWorkspaceIcon(workspaceId: string, dataUrl: string): Promise<Workspace> {
+    return fetch(`/api/workspaces/${workspaceId}/icon`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dataUrl }),
+    }).then((response) => parseJson<Workspace>(response))
+  },
+
+  deleteWorkspaceIcon(workspaceId: string): Promise<Workspace> {
+    return fetch(`/api/workspaces/${workspaceId}/icon`, {
+      method: 'DELETE',
+    }).then((response) => parseJson<Workspace>(response))
+  },
 }

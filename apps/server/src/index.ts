@@ -6,6 +6,7 @@ import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { BIRDSEYE_HOME, LEGACY_PI_HOME, ensureBirdseyeHome } from './config.js'
+import { deleteWorkspaceIcon, getWorkspaceIconMetaSync, saveWorkspaceIconFromDataUrl } from './workspace-icons.js'
 import { loadBirdseyeSettings, normalizeBirdseyeSettingsPayload, saveBirdseyeSettings } from './birdseye-settings.js'
 import { getPiMigrationStatus, runPiMigration, skipPiMigration } from './pi-migration.js'
 import {
@@ -33,7 +34,7 @@ const webDistDir = resolve(__dirname, '../../web/dist')
 ensureBirdseyeHome()
 
 app.use(cors())
-app.use(express.json())
+app.use(express.json({ limit: '8mb' }))
 
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true })
@@ -153,6 +154,60 @@ app.delete('/api/workspaces/:workspaceId', async (req, res) => {
   }
 
   res.json({ ok: true })
+})
+
+app.get('/api/workspaces/:workspaceId/icon', async (req, res) => {
+  const workspace = await getWorkspace(req.params.workspaceId)
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' })
+    return
+  }
+
+  const iconMeta = getWorkspaceIconMetaSync(workspace.id)
+  if (!iconMeta) {
+    res.status(404).json({ error: 'Workspace icon not found' })
+    return
+  }
+
+  res.setHeader('Content-Type', iconMeta.mime)
+  // Icon URLs are cache-busted via iconUpdatedAt.
+  res.setHeader('Cache-Control', 'public, max-age=86400')
+  res.sendFile(iconMeta.path)
+})
+
+app.post('/api/workspaces/:workspaceId/icon', async (req, res) => {
+  const workspace = await getWorkspace(req.params.workspaceId)
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' })
+    return
+  }
+
+  const dataUrl = typeof req.body?.dataUrl === 'string' ? req.body.dataUrl : ''
+  if (!dataUrl.trim()) {
+    res.status(400).json({ error: 'dataUrl is required' })
+    return
+  }
+
+  try {
+    saveWorkspaceIconFromDataUrl(workspace.id, dataUrl)
+    touchWorkspace(workspace.id)
+    res.json(await getWorkspace(workspace.id))
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to save workspace icon'
+    res.status(400).json({ error: message })
+  }
+})
+
+app.delete('/api/workspaces/:workspaceId/icon', async (req, res) => {
+  const workspace = await getWorkspace(req.params.workspaceId)
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' })
+    return
+  }
+
+  deleteWorkspaceIcon(workspace.id)
+  touchWorkspace(workspace.id)
+  res.json(await getWorkspace(workspace.id))
 })
 
 app.get('/api/workspaces/:workspaceId', async (req, res) => {
@@ -390,6 +445,45 @@ app.post('/api/workspaces/:workspaceId/sessions/:viewerId/archive', async (req, 
     const message = error instanceof Error ? error.message : 'Failed to archive session'
     res.status(400).json({ error: message })
   }
+})
+
+app.post('/api/workspaces/:workspaceId/sessions/archive', async (req, res) => {
+  const workspace = await getWorkspace(req.params.workspaceId)
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' })
+    return
+  }
+
+  const viewerIdsRaw = req.body?.viewerIds
+  const viewerIds = Array.isArray(viewerIdsRaw)
+    ? viewerIdsRaw.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    : []
+
+  if (viewerIds.length === 0) {
+    res.status(400).json({ error: 'viewerIds is required' })
+    return
+  }
+
+  if (viewerIds.length > 500) {
+    res.status(400).json({ error: 'Too many sessions requested for archival (max 500).' })
+    return
+  }
+
+  const archived: string[] = []
+  const errors: Array<{ viewerId: string; error: string }> = []
+
+  for (const viewerId of viewerIds) {
+    try {
+      await archiveSession(workspace.path, viewerId)
+      archived.push(viewerId)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to archive session'
+      errors.push({ viewerId, error: message })
+    }
+  }
+
+  touchWorkspace(workspace.id)
+  res.json({ ok: true, archived, errors })
 })
 
 if (existsSync(webDistDir)) {

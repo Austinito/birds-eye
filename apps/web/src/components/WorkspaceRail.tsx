@@ -2,20 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../api'
 import type { Workspace } from '../types'
+import { workspaceHueFromName, workspaceIconSrc, workspaceInitials } from '../workspace-utils'
 
-function initials(name: string) {
-  const parts = name.split(/[-_.\s]+/).filter(Boolean)
-  if (parts.length >= 2) return `${parts[0][0]}${parts[1][0]}`.toUpperCase()
-  return name.slice(0, 2).toUpperCase()
-}
-
-function hueFromName(name: string) {
-  let hash = 0
-  for (let index = 0; index < name.length; index += 1) {
-    hash = name.charCodeAt(index) + ((hash << 5) - hash)
-  }
-  return Math.abs(hash) % 360
-}
 
 export function WorkspaceRail() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([])
@@ -25,9 +13,20 @@ export function WorkspaceRail() {
   const stackRef = useRef<HTMLDivElement | null>(null)
   const pillRefs = useRef<Record<string, HTMLAnchorElement | null>>({})
 
-  useEffect(() => {
+  const reloadWorkspaces = useCallback(() => {
     api.getWorkspaces().then(setWorkspaces).catch(console.error)
-  }, [location.pathname])
+  }, [])
+
+  useEffect(() => {
+    reloadWorkspaces()
+
+    const handleWorkspacesChanged = () => reloadWorkspaces()
+    window.addEventListener('birdseye-workspaces-changed', handleWorkspacesChanged)
+
+    return () => {
+      window.removeEventListener('birdseye-workspaces-changed', handleWorkspacesChanged)
+    }
+  }, [location.pathname, reloadWorkspaces])
 
   const sortedWorkspaces = useMemo(
     () => [...workspaces]
@@ -79,10 +78,12 @@ export function WorkspaceRail() {
       <div className="rail-stack" ref={stackRef}>
         {sortedWorkspaces.map((workspace) => {
           const active = workspace.id === activeWorkspaceId
-          const hue = hueFromName(workspace.name)
+          const hue = workspaceHueFromName(workspace.name)
+          const iconSrc = workspaceIconSrc(workspace)
+
           return (
             <Link
-              className={`rail-pill ${active ? 'rail-pill-active' : ''}`}
+              className={`rail-pill ${active ? 'rail-pill-active' : ''} ${iconSrc ? 'rail-pill-has-icon' : ''}`}
               key={workspace.id}
               to={`/workspace/${workspace.id}`}
               title={workspace.path}
@@ -90,9 +91,13 @@ export function WorkspaceRail() {
                 pillRefs.current[workspace.id] = element
               }}
               aria-current={active ? 'page' : undefined}
-              style={{ backgroundColor: `hsl(${hue}, 54%, 44%)` }}
+              style={iconSrc ? undefined : { backgroundColor: `hsl(${hue}, 54%, 44%)` }}
             >
-              {initials(workspace.name)}
+              {iconSrc ? (
+                <img className="rail-pill-icon" src={iconSrc} alt="" aria-hidden="true" />
+              ) : (
+                workspaceInitials(workspace.name)
+              )}
             </Link>
           )
         })}

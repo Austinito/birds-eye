@@ -1,16 +1,49 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import type {
+  ChangeEvent as ReactChangeEvent,
+  CSSProperties,
+  KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent as ReactMouseEvent,
+  PointerEvent as ReactPointerEvent,
+} from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api'
 import { ThemeToggle } from '../components/ThemeToggle'
+import { Markdown } from '../components/Markdown'
 import { WorkspaceRail } from '../components/WorkspaceRail'
-import { AgentIcon, ArchiveIcon, ArrowRightIcon, BrainIcon, CacheReadIcon, CacheWriteIcon, DoneIcon, GearIcon, SpinnerIcon, SystemIcon, TokenInIcon, TokenOutIcon, ToolErrIcon, ToolOkIcon, UserIcon } from '../components/icons'
+import { AgentIcon, ArchiveIcon, ArrowRightIcon, BrainIcon, CacheReadIcon, CacheWriteIcon, DoneIcon, GearIcon, ImageIcon, SpinnerIcon, SystemIcon, TokenInIcon, TokenOutIcon, ToolErrIcon, ToolOkIcon, UserIcon, XIcon } from '../components/icons'
 import type { BirdseyeSettings, LiveSessionState, LiveSessionSummary, ModelOption, SessionDetail, SessionEntryView, SessionSummary, ThinkingLevel, Workspace } from '../types'
+import { workspaceHueFromName, workspaceIconSrc, workspaceInitials } from '../workspace-utils'
 
 const DEFAULT_THINKING_LEVEL: ThinkingLevel = 'medium'
 const THINKING_LEVELS: ThinkingLevel[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh']
 const NEW_SESSION_DRAFT_SCOPE = '__new__'
 const LIVE_ASSISTANT_ENTRY_PREFIX = '__live-assistant__:'
 const LIVE_EVENT_ENTRY_PREFIX = '__live-event__:'
+const LIVE_THINKING_ENTRY_PREFIX = '__live-thinking__:'
+const LIVE_TOOL_ENTRY_PREFIX = '__live-tool__:'
+
+const DEFAULT_SESSION_LIST_WIDTH = 360
+const MIN_SESSION_LIST_WIDTH = 260
+const MIN_SESSION_VIEWER_WIDTH = 360
+const SESSION_LIST_RESIZER_WIDTH = 10
+
+type LiveRenderEntry =
+  | {
+      kind: 'thinking'
+      id: string
+      text: string
+    }
+  | {
+      kind: 'tool'
+      id: string
+      toolCallId: string
+      toolName: string
+      output: string
+      isComplete: boolean
+      isError: boolean
+      result?: string
+    }
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat(undefined, {
@@ -65,6 +98,19 @@ function writeStoredDraft(key: string, value: string) {
   } else {
     window.localStorage.removeItem(key)
   }
+}
+
+function getSessionListWidthStorageKey(workspaceId?: string) {
+  if (!workspaceId) return null
+  return `birds-eye:session-list-width:${workspaceId}`
+}
+
+function readStoredNumber(key: string) {
+  if (typeof window === 'undefined') return null
+  const raw = window.localStorage.getItem(key)
+  if (!raw) return null
+  const value = Number(raw)
+  return Number.isFinite(value) ? value : null
 }
 
 function createOptimisticRuntime(runtime: LiveSessionState | null, modelKey: string, thinkingLevel: ThinkingLevel): LiveSessionState {
@@ -135,8 +181,17 @@ function appendLiveEventEntry(detail: SessionDetail, text: string, role: Session
   }
 }
 
-function SessionEntryBody({ text, defaultExpanded = false }: { text: string; defaultExpanded?: boolean }) {
-  const contentRef = useRef<HTMLPreElement | null>(null)
+function SessionEntryBody({
+  text,
+  role,
+  defaultExpanded = false,
+}: {
+  text: string
+  role: SessionEntryView['role']
+  defaultExpanded?: boolean
+}) {
+  const contentRef = useRef<HTMLDivElement | null>(null)
+  const renderPlainText = role === 'toolResult'
   const [expanded, setExpanded] = useState(defaultExpanded)
   const [overflowing, setOverflowing] = useState(false)
 
@@ -152,12 +207,12 @@ function SessionEntryBody({ text, defaultExpanded = false }: { text: string; def
 
   return (
     <div className="session-entry-body-wrap">
-      <pre
-        className={`session-entry-body ${overflowing && !expanded ? 'session-entry-body-collapsed' : ''}`}
+      <div
+        className={`session-entry-body ${renderPlainText ? 'session-entry-body-plain-wrap' : 'session-entry-body-markdown'} ${overflowing && !expanded ? 'session-entry-body-collapsed' : ''}`}
         ref={contentRef}
       >
-        {text}
-      </pre>
+        {renderPlainText ? <pre className="session-entry-body-plain">{text}</pre> : <Markdown text={text} />}
+      </div>
       {overflowing && (
         <button className="session-entry-toggle" onClick={() => setExpanded((value) => !value)}>
           {expanded ? 'Collapse' : 'Expand'}
@@ -181,7 +236,7 @@ function SessionEntry({ entry, defaultExpanded = false }: { entry: SessionEntryV
         </span>
         {entry.timestamp && <span className="session-entry-time">{formatDate(entry.timestamp)}</span>}
       </div>
-      <SessionEntryBody text={entry.text} defaultExpanded={defaultExpanded} />
+      <SessionEntryBody text={entry.text} role={entry.role} defaultExpanded={defaultExpanded} />
     </article>
   )
 }
@@ -191,16 +246,23 @@ export function WorkspacePage() {
   const navigate = useNavigate()
   const entryListRef = useRef<HTMLDivElement | null>(null)
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const workspaceContentRef = useRef<HTMLDivElement | null>(null)
+  const sessionListWidthRef = useRef(DEFAULT_SESSION_LIST_WIDTH)
+  const sessionListResizeStateRef = useRef<{ startX: number; startWidth: number } | null>(null)
+
   const activeWorkspaceIdRef = useRef<string | undefined>(workspaceId)
   const activeViewerIdRef = useRef<string | undefined>(viewerId)
   const selectedSessionRef = useRef<SessionDetail | null>(null)
   const runtimeRef = useRef<LiveSessionState | null>(null)
   const composerTextRef = useRef('')
   const lastDraftKeyRef = useRef<string | null>(null)
+  const activeLiveThinkingEntryIdRef = useRef<string | null>(null)
+  const workspaceIconInputRef = useRef<HTMLInputElement | null>(null)
 
   const [workspace, setWorkspace] = useState<Workspace | null>(null)
   const [settings, setSettings] = useState<BirdseyeSettings | null>(null)
   const [sessions, setSessions] = useState<SessionSummary[]>([])
+  const [sessionListWidth, setSessionListWidth] = useState(DEFAULT_SESSION_LIST_WIDTH)
   const [selectedSession, setSelectedSession] = useState<SessionDetail | null>(null)
   const [modelOptions, setModelOptions] = useState<ModelOption[]>([])
   const [runtime, setRuntime] = useState<LiveSessionState | null>(null)
@@ -221,22 +283,29 @@ export function WorkspacePage() {
   const [renameValue, setRenameValue] = useState('')
   const [renameLoading, setRenameLoading] = useState(false)
   const [archiveLoading, setArchiveLoading] = useState(false)
+  const [archiveBulkLoading, setArchiveBulkLoading] = useState(false)
+  const [archiveListViewerId, setArchiveListViewerId] = useState<string | null>(null)
+  const [workspaceIconSaving, setWorkspaceIconSaving] = useState(false)
 
-  const [liveThinkingText, setLiveThinkingText] = useState('')
+  const [selectedViewerIds, setSelectedViewerIds] = useState<string[]>([])
+  const [selectionAnchorViewerId, setSelectionAnchorViewerId] = useState<string | null>(null)
+
+  const [liveEntries, setLiveEntries] = useState<LiveRenderEntry[]>([])
 
   const [thinkingExpandedByDefault, setThinkingExpandedByDefault] = useState(false)
   const [toolOutputsExpandedByDefault, setToolOutputsExpandedByDefault] = useState(false)
   const [shortcutToast, setShortcutToast] = useState<{ id: number; message: string } | null>(null)
   const [showHotkeyHelp, setShowHotkeyHelp] = useState(false)
-  const [liveToolCalls, setLiveToolCalls] = useState<Array<{
-    toolCallId: string
-    toolName: string
-    input?: Record<string, unknown>
-    output: string
-    isComplete: boolean
-    isError: boolean
-    result?: string
-  }>>([])
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return
+
+    if (workspace?.name) {
+      document.title = `${workspace.name} - Bird's Eye`
+    } else {
+      document.title = "Bird's Eye"
+    }
+  }, [workspace?.name])
 
   const composerHistoryRef = useRef<{
     index: number
@@ -264,6 +333,140 @@ export function WorkspacePage() {
     }
     return map
   }, [liveSessionSummaries])
+
+  const selectedViewerIdSet = useMemo(() => new Set(selectedViewerIds), [selectedViewerIds])
+
+  const clampSessionListWidth = (value: number) => {
+    const containerWidth = workspaceContentRef.current?.getBoundingClientRect().width
+      ?? (typeof window !== 'undefined' ? window.innerWidth : value)
+
+    const maxWidth = Math.min(
+      920,
+      containerWidth - MIN_SESSION_VIEWER_WIDTH - SESSION_LIST_RESIZER_WIDTH,
+    )
+
+    return Math.max(
+      MIN_SESSION_LIST_WIDTH,
+      Math.min(Math.max(MIN_SESSION_LIST_WIDTH, maxWidth), value),
+    )
+  }
+
+  const persistSessionListWidth = (width: number) => {
+    const key = getSessionListWidthStorageKey(workspaceId)
+    if (!key || typeof window === 'undefined') return
+    window.localStorage.setItem(key, String(Math.round(width)))
+  }
+
+  const resetSessionListWidth = () => {
+    const next = clampSessionListWidth(DEFAULT_SESSION_LIST_WIDTH)
+    setSessionListWidth(next)
+    persistSessionListWidth(next)
+  }
+
+  const handleSessionListResizerPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return
+    event.preventDefault()
+
+    sessionListResizeStateRef.current = {
+      startX: event.clientX,
+      startWidth: sessionListWidthRef.current,
+    }
+
+    if (typeof document !== 'undefined') {
+      document.body.classList.add('is-session-list-resizing')
+    }
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      const state = sessionListResizeStateRef.current
+      if (!state) return
+
+      const next = clampSessionListWidth(state.startWidth + (moveEvent.clientX - state.startX))
+      sessionListWidthRef.current = next
+      setSessionListWidth(next)
+    }
+
+    const handlePointerUp = () => {
+      sessionListResizeStateRef.current = null
+      if (typeof document !== 'undefined') {
+        document.body.classList.remove('is-session-list-resizing')
+      }
+      window.removeEventListener('pointermove', handlePointerMove)
+      persistSessionListWidth(sessionListWidthRef.current)
+    }
+
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', handlePointerUp, { once: true })
+    window.addEventListener('pointercancel', handlePointerUp, { once: true })
+  }
+
+  const handleSessionListResizerKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const step = 24
+
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault()
+      const next = clampSessionListWidth(sessionListWidthRef.current - step)
+      sessionListWidthRef.current = next
+      setSessionListWidth(next)
+      persistSessionListWidth(next)
+      return
+    }
+
+    if (event.key === 'ArrowRight') {
+      event.preventDefault()
+      const next = clampSessionListWidth(sessionListWidthRef.current + step)
+      sessionListWidthRef.current = next
+      setSessionListWidth(next)
+      persistSessionListWidth(next)
+      return
+    }
+
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      resetSessionListWidth()
+    }
+  }
+
+  useEffect(() => {
+    sessionListWidthRef.current = sessionListWidth
+  }, [sessionListWidth])
+
+  useEffect(() => {
+    const key = getSessionListWidthStorageKey(workspaceId)
+    if (!key) return
+
+    const stored = readStoredNumber(key)
+    const next = clampSessionListWidth(stored ?? DEFAULT_SESSION_LIST_WIDTH)
+    sessionListWidthRef.current = next
+    setSessionListWidth(next)
+  }, [workspaceId])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const handleResize = () => {
+      setSessionListWidth((prev) => {
+        const next = clampSessionListWidth(prev)
+        sessionListWidthRef.current = next
+        return next
+      })
+    }
+
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
+
+  useEffect(() => {
+    if (selectedViewerIds.length === 0) return
+
+    const remaining = selectedViewerIds.filter((candidate) => sessions.some((session) => session.viewerId === candidate))
+    if (remaining.length !== selectedViewerIds.length) {
+      setSelectedViewerIds(remaining)
+    }
+
+    if (selectionAnchorViewerId && !remaining.includes(selectionAnchorViewerId)) {
+      setSelectionAnchorViewerId(null)
+    }
+  }, [sessions, selectedViewerIds, selectionAnchorViewerId])
 
   useEffect(() => {
     if (!selectedSession) {
@@ -353,6 +556,143 @@ export function WorkspacePage() {
       setError(message)
     } finally {
       setArchiveLoading(false)
+    }
+  }
+
+  const commitBulkArchive = async () => {
+    if (!workspaceId || selectedViewerIds.length === 0 || archiveBulkLoading) return
+
+    const selectedSummaries = sessions.filter((session) => selectedViewerIdSet.has(session.viewerId))
+    if (selectedSummaries.length === 0) {
+      setSelectedViewerIds([])
+      return
+    }
+
+    const streamingSelected = selectedSummaries.filter((session) => liveSummaryMap.get(session.viewerId)?.isStreaming)
+    if (streamingSelected.length > 0) {
+      const plural = streamingSelected.length === 1 ? 'session is' : 'sessions are'
+      setError(`Cannot archive while ${plural} working.`)
+      return
+    }
+
+    const confirmMessage = selectedSummaries.length === 1
+      ? `Archive session “${selectedSummaries[0]?.title ?? ''}”?`
+      : `Archive ${selectedSummaries.length} sessions?`
+
+    const confirmed = window.confirm(confirmMessage)
+    if (!confirmed) return
+
+    setError('')
+
+    try {
+      setArchiveBulkLoading(true)
+      const response = await api.archiveSessions(workspaceId, selectedSummaries.map((session) => session.viewerId))
+
+      const archived = response.archived
+      const failures = response.errors
+
+      for (const viewerId of archived) {
+        clearDraftByKey(getDraftStorageKey(workspaceId, viewerId))
+      }
+
+      setSessions((prev) => prev.filter((session) => !archived.includes(session.viewerId)))
+      setLiveSessionSummaries((prev) => prev.filter((summary) => !archived.includes(summary.viewerId)))
+
+      if (archived.includes(viewerId ?? '')) {
+        setSelectedSession(null)
+        setRuntime(null)
+        setRenamingSession(false)
+        setRenameValue('')
+        navigate(`/workspace/${workspaceId}`)
+      }
+
+      if (failures.length > 0) {
+        setError(`Archived ${archived.length} sessions; ${failures.length} failed.`)
+        const failedIds = new Set(failures.map((failure) => failure.viewerId))
+        setSelectedViewerIds(selectedViewerIds.filter((candidate) => failedIds.has(candidate)))
+      } else {
+        setSelectedViewerIds([])
+        setSelectionAnchorViewerId(null)
+      }
+    } catch (archiveError) {
+      const message = archiveError instanceof Error ? archiveError.message : 'Failed to archive sessions'
+      setError(message)
+    } finally {
+      setArchiveBulkLoading(false)
+    }
+  }
+
+  const handleSessionCardClick = (event: ReactMouseEvent, targetViewerId: string) => {
+    if (!workspaceId) return
+
+    if (event.shiftKey) {
+      event.preventDefault()
+      const anchorId = selectionAnchorViewerId ?? targetViewerId
+      if (!selectionAnchorViewerId) {
+        setSelectionAnchorViewerId(anchorId)
+      }
+      const anchorIndex = sessions.findIndex((session) => session.viewerId === anchorId)
+      const targetIndex = sessions.findIndex((session) => session.viewerId === targetViewerId)
+      if (anchorIndex === -1 || targetIndex === -1) {
+        setSelectedViewerIds([targetViewerId])
+        setSelectionAnchorViewerId(targetViewerId)
+        return
+      }
+
+      const [start, end] = anchorIndex < targetIndex ? [anchorIndex, targetIndex] : [targetIndex, anchorIndex]
+      setSelectedViewerIds(sessions.slice(start, end + 1).map((session) => session.viewerId))
+      return
+    }
+
+    if (event.metaKey || event.ctrlKey) {
+      event.preventDefault()
+      setSelectedViewerIds((prev) => (prev.includes(targetViewerId)
+        ? prev.filter((candidate) => candidate !== targetViewerId)
+        : [...prev, targetViewerId]))
+      setSelectionAnchorViewerId(targetViewerId)
+      return
+    }
+
+    setSelectedViewerIds([])
+    setSelectionAnchorViewerId(targetViewerId)
+    navigate(`/workspace/${workspaceId}/sessions/${targetViewerId}`)
+  }
+
+  const commitArchiveFromList = async (target: SessionSummary) => {
+    if (!workspaceId || archiveListViewerId) return
+
+    const liveSummary = liveSummaryMap.get(target.viewerId)
+    if (liveSummary?.isStreaming) {
+      setError('Wait for the session to finish before archiving.')
+      return
+    }
+
+    const confirmed = window.confirm(`Archive session “${target.title}”?`)
+    if (!confirmed) return
+
+    setError('')
+
+    try {
+      setArchiveListViewerId(target.viewerId)
+      await api.archiveSession(workspaceId, target.viewerId)
+      clearDraftByKey(getDraftStorageKey(workspaceId, target.viewerId))
+
+      setSessions((prev) => prev.filter((session) => session.viewerId !== target.viewerId))
+      setLiveSessionSummaries((prev) => prev.filter((summary) => summary.viewerId !== target.viewerId))
+      setSelectedViewerIds((prev) => prev.filter((viewerId) => viewerId !== target.viewerId))
+
+      if (viewerId === target.viewerId) {
+        setSelectedSession(null)
+        setRuntime(null)
+        setRenamingSession(false)
+        setRenameValue('')
+        navigate(`/workspace/${workspaceId}`)
+      }
+    } catch (archiveError) {
+      const message = archiveError instanceof Error ? archiveError.message : 'Failed to archive session'
+      setError(message)
+    } finally {
+      setArchiveListViewerId(null)
     }
   }
 
@@ -478,6 +818,65 @@ export function WorkspacePage() {
     }
   }
 
+  const handleWorkspaceIconUploadClick = () => {
+    workspaceIconInputRef.current?.click()
+  }
+
+  const handleWorkspaceIconFileChange = (event: ReactChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] ?? null
+
+    // Allow re-selecting the same file later.
+    event.target.value = ''
+
+    if (!file || !workspaceId) return
+
+    const reader = new FileReader()
+    reader.onload = () => {
+      const dataUrl = typeof reader.result === 'string' ? reader.result : ''
+      if (!dataUrl) return
+
+      setWorkspaceIconSaving(true)
+      setError('')
+
+      api.saveWorkspaceIcon(workspaceId, dataUrl)
+        .then((updated) => {
+          setWorkspace(updated)
+          window.dispatchEvent(new Event('birdseye-workspaces-changed'))
+        })
+        .catch((err) => {
+          setError(err instanceof Error ? err.message : String(err))
+        })
+        .finally(() => {
+          setWorkspaceIconSaving(false)
+        })
+    }
+
+    reader.onerror = () => {
+      setError('Failed to read icon file')
+    }
+
+    reader.readAsDataURL(file)
+  }
+
+  const handleWorkspaceIconReset = () => {
+    if (!workspaceId) return
+
+    setWorkspaceIconSaving(true)
+    setError('')
+
+    api.deleteWorkspaceIcon(workspaceId)
+      .then((updated) => {
+        setWorkspace(updated)
+        window.dispatchEvent(new Event('birdseye-workspaces-changed'))
+      })
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : String(err))
+      })
+      .finally(() => {
+        setWorkspaceIconSaving(false)
+      })
+  }
+
   useEffect(() => {
     activeWorkspaceIdRef.current = workspaceId
     activeViewerIdRef.current = viewerId
@@ -533,8 +932,8 @@ export function WorkspacePage() {
       setSelectedSession(null)
       setRuntime(null)
       setDetailLoading(false)
-      setLiveThinkingText('')
-      setLiveToolCalls([])
+      activeLiveThinkingEntryIdRef.current = null
+      setLiveEntries([])
       setError('')
       return
     }
@@ -546,8 +945,8 @@ export function WorkspacePage() {
     if (!alreadyHydrated) {
       setDetailLoading(true)
       setRuntime(null)
-      setLiveThinkingText('')
-      setLiveToolCalls([])
+      activeLiveThinkingEntryIdRef.current = null
+      setLiveEntries([])
     } else {
       setDetailLoading(false)
     }
@@ -886,8 +1285,8 @@ export function WorkspacePage() {
             setComposerActionLoading(false)
             clearDraftByKey(draftKeyAtSendStart)
 
-            setLiveThinkingText('')
-            setLiveToolCalls([])
+            activeLiveThinkingEntryIdRef.current = null
+            setLiveEntries([])
 
             if (isViewingSession(activeViewerId)) {
               setRuntime(createOptimisticRuntime(liveRuntime, requestedModelKey ?? '', requestedThinkingLevel))
@@ -945,34 +1344,58 @@ export function WorkspacePage() {
             }
 
             if (event.type === 'thinking-start') {
-              setLiveThinkingText('')
+              activeLiveThinkingEntryIdRef.current = `${LIVE_THINKING_ENTRY_PREFIX}${Date.now()}-${Math.random().toString(36).slice(2)}`
               return
             }
 
             if (event.type === 'thinking-delta') {
               if (event.delta) {
                 const delta = event.delta
-                setLiveThinkingText((prev) => prev + delta)
+                setLiveEntries((prev) => {
+                  const activeThinkingEntryId = activeLiveThinkingEntryIdRef.current
+                  if (activeThinkingEntryId) {
+                    let found = false
+                    const next = prev.map((entry) => {
+                      if (entry.kind !== 'thinking' || entry.id !== activeThinkingEntryId) return entry
+                      found = true
+                      return { ...entry, text: entry.text + delta }
+                    })
+                    if (found) return next
+                  }
+
+                  const thinkingEntryId = `${LIVE_THINKING_ENTRY_PREFIX}${Date.now()}-${Math.random().toString(36).slice(2)}`
+                  activeLiveThinkingEntryIdRef.current = thinkingEntryId
+                  return [
+                    ...prev,
+                    {
+                      kind: 'thinking',
+                      id: thinkingEntryId,
+                      text: delta,
+                    },
+                  ]
+                })
                 maybeScrollToBottom()
               }
               return
             }
 
             if (event.type === 'thinking-end') {
-              // Keep thinking visible until the run finishes; the persisted session detail will include it.
+              activeLiveThinkingEntryIdRef.current = null
               return
             }
 
             if (event.type === 'tool-start' && event.toolCallId && event.toolName) {
               const toolCallId = event.toolCallId
-              setLiveToolCalls((prev) => {
-                if (prev.some((tc) => tc.toolCallId === toolCallId)) return prev
+              activeLiveThinkingEntryIdRef.current = null
+              setLiveEntries((prev) => {
+                if (prev.some((entry) => entry.kind === 'tool' && entry.toolCallId === toolCallId)) return prev
                 return [
                   ...prev,
                   {
+                    kind: 'tool',
+                    id: `${LIVE_TOOL_ENTRY_PREFIX}${toolCallId}`,
                     toolCallId,
                     toolName: event.toolName ?? 'tool',
-                    input: event.toolInput,
                     output: '',
                     isComplete: false,
                     isError: false,
@@ -986,29 +1409,64 @@ export function WorkspacePage() {
             if (event.type === 'tool-delta' && event.toolCallId && event.delta) {
               const toolCallId = event.toolCallId
               const delta = event.delta
-              setLiveToolCalls((prev) => prev.map((tc) => (
-                tc.toolCallId === toolCallId
-                  ? { ...tc, output: tc.output + delta }
-                  : tc
-              )))
+              activeLiveThinkingEntryIdRef.current = null
+              setLiveEntries((prev) => {
+                let found = false
+                const next = prev.map((entry) => {
+                  if (entry.kind !== 'tool' || entry.toolCallId !== toolCallId) return entry
+                  found = true
+                  return { ...entry, output: entry.output + delta }
+                })
+                if (found) return next
+                return [
+                  ...prev,
+                  {
+                    kind: 'tool',
+                    id: `${LIVE_TOOL_ENTRY_PREFIX}${toolCallId}`,
+                    toolCallId,
+                    toolName: event.toolName ?? 'tool',
+                    output: delta,
+                    isComplete: false,
+                    isError: false,
+                  },
+                ]
+              })
               maybeScrollToBottom()
               return
             }
 
             if (event.type === 'tool-end' && event.toolCallId) {
               const toolCallId = event.toolCallId
-              setLiveToolCalls((prev) => prev.map((tc) => (
-                tc.toolCallId === toolCallId
-                  ? {
-                      ...tc,
-                      toolName: event.toolName ?? tc.toolName,
-                      isComplete: true,
-                      isError: Boolean(event.isError),
-                      result: event.result,
-                      output: event.result ?? tc.output,
-                    }
-                  : tc
-              )))
+              activeLiveThinkingEntryIdRef.current = null
+              setLiveEntries((prev) => {
+                let found = false
+                const next = prev.map((entry) => {
+                  if (entry.kind !== 'tool' || entry.toolCallId !== toolCallId) return entry
+                  found = true
+                  return {
+                    ...entry,
+                    toolName: event.toolName ?? entry.toolName,
+                    isComplete: true,
+                    isError: Boolean(event.isError),
+                    result: event.result,
+                    output: event.result ?? entry.output,
+                  }
+                })
+                if (found) return next
+                return [
+                  ...prev,
+                  {
+                    kind: 'tool',
+                    id: `${LIVE_TOOL_ENTRY_PREFIX}${toolCallId}`,
+                    toolCallId,
+                    toolName: event.toolName ?? 'tool',
+                    output: event.result ?? '',
+                    isComplete: true,
+                    isError: Boolean(event.isError),
+                    result: event.result,
+                  },
+                ]
+              })
               maybeScrollToBottom()
               return
             }
@@ -1035,8 +1493,8 @@ export function WorkspacePage() {
             }
 
             if (event.type === 'done') {
-              setLiveThinkingText('')
-              setLiveToolCalls([])
+              activeLiveThinkingEntryIdRef.current = null
+              setLiveEntries([])
               if (event.detail) {
                 setSelectedSession(event.detail)
               }
@@ -1045,8 +1503,8 @@ export function WorkspacePage() {
             }
 
             if (event.type === 'error') {
-              setLiveThinkingText('')
-              setLiveToolCalls([])
+              activeLiveThinkingEntryIdRef.current = null
+              setLiveEntries([])
               setError(event.message ?? 'Failed to send live session message')
               void api.getSession(sendWorkspaceId, activeViewerId)
                 .then((detail) => {
@@ -1390,6 +1848,11 @@ export function WorkspacePage() {
     </div>
   )
 
+  const workspaceName = workspace?.name ?? 'Unknown workspace'
+  const headerIconSrc = workspace ? workspaceIconSrc(workspace) : null
+  const headerHue = workspace ? workspaceHueFromName(workspace.name) : 0
+  const headerInitials = workspace ? workspaceInitials(workspace.name) : ''
+
   if (loading) {
     return (
       <main className="workspace-shell workspace-shell-loading">
@@ -1406,7 +1869,22 @@ export function WorkspacePage() {
       <section className="workspace-main">
         <header className="workspace-summary-bar">
           <div className="workspace-summary-main">
-            <h1>{workspace?.name ?? 'Unknown workspace'}</h1>
+            <div className="workspace-title-wrap">
+              {workspace ? (
+                headerIconSrc ? (
+                  <img className="workspace-title-icon" src={headerIconSrc} alt="" aria-hidden="true" />
+                ) : (
+                  <div
+                    className="workspace-title-fallback"
+                    style={{ backgroundColor: `hsl(${headerHue}, 54%, 44%)` }}
+                    aria-hidden="true"
+                  >
+                    {headerInitials}
+                  </div>
+                )
+              ) : null}
+              <h1>{workspaceName}</h1>
+            </div>
             <span className="workspace-summary-separator">|</span>
             <p className="workspace-summary-meta">
               Sessions: <span className="workspace-session-count">{sessions.length}</span>
@@ -1414,6 +1892,38 @@ export function WorkspacePage() {
           </div>
 
           <div className="workspace-summary-actions">
+            <input
+              ref={workspaceIconInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              className="sr-only"
+              onChange={handleWorkspaceIconFileChange}
+            />
+
+            <button
+              className="icon-button"
+              onClick={handleWorkspaceIconUploadClick}
+              title="Upload workspace icon"
+              aria-label="Upload workspace icon"
+              type="button"
+              disabled={workspaceIconSaving}
+            >
+              <ImageIcon className="icon" />
+            </button>
+
+            {headerIconSrc && (
+              <button
+                className="icon-button"
+                onClick={handleWorkspaceIconReset}
+                title="Remove workspace icon"
+                aria-label="Remove workspace icon"
+                type="button"
+                disabled={workspaceIconSaving}
+              >
+                <XIcon className="icon" />
+              </button>
+            )}
+
             <button
               className="icon-button"
               onClick={() => navigate('/settings')}
@@ -1429,11 +1939,48 @@ export function WorkspacePage() {
 
         {error && <div className="error-banner global-error">{error}</div>}
 
-        <div className="workspace-content">
+        <div
+          className="workspace-content"
+          ref={workspaceContentRef}
+          style={{
+            '--session-list-width': `${sessionListWidth}px`,
+          } as CSSProperties}
+        >
           <aside className="session-list-panel card">
-            <div className="section-header sticky-header">
-              <div>
-                <div className="eyebrow">Workspace sessions</div>
+            <div className="section-header sticky-header session-list-header">
+              <div className="session-list-header-row">
+                <div>
+                  <div className="eyebrow">Workspace sessions</div>
+                  <div className="muted session-list-hint">Shift/Cmd-click to select multiple.</div>
+                </div>
+
+                {selectedViewerIds.length > 0 && (
+                  <div className="session-list-bulk-actions">
+                    <span className="muted">{selectedViewerIds.length} selected</span>
+                    <button
+                      className="button button-secondary"
+                      type="button"
+                      onClick={() => void commitBulkArchive()}
+                      disabled={archiveBulkLoading}
+                      title="Archive selected sessions"
+                    >
+                      <ArchiveIcon className="icon" />
+                      {archiveBulkLoading ? 'Archiving…' : 'Archive'}
+                    </button>
+                    <button
+                      className="button button-secondary"
+                      type="button"
+                      onClick={() => {
+                        setSelectedViewerIds([])
+                        setSelectionAnchorViewerId(null)
+                      }}
+                      disabled={archiveBulkLoading}
+                      title="Clear selection"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1443,89 +1990,122 @@ export function WorkspacePage() {
                   No saved sessions were found for this workspace yet.
                 </div>
               ) : (
-                sessions.map((session) => (
-                  <button
-                    className={`session-card ${session.viewerId === viewerId ? 'session-card-active' : ''}`}
-                    key={session.viewerId}
-                    onClick={() => navigate(`/workspace/${workspaceId}/sessions/${session.viewerId}`)}
-                  >
-                    <div className="session-card-topline">
-                      <strong>{session.title}</strong>
-                      {(() => {
-                        const liveSummary = liveSummaryMap.get(session.viewerId)
-                        if (!liveSummary?.active) return null
-                        return (
-                          <span
-                            className={`session-live-indicator ${liveSummary.isStreaming ? 'session-live-indicator-working' : 'session-live-indicator-ready'}`}
-                            title={liveSummary.isStreaming ? 'Working' : 'Ready'}
+                sessions.map((session) => {
+                  const liveSummary = liveSummaryMap.get(session.viewerId)
+                  const isArchiving = archiveListViewerId === session.viewerId
+
+                  return (
+                    <div
+                      className={`session-card ${session.viewerId === viewerId ? 'session-card-active' : ''} ${selectedViewerIdSet.has(session.viewerId) ? 'session-card-selected' : ''}`}
+                      key={session.viewerId}
+                      role="button"
+                      tabIndex={0}
+                      onClick={(event) => handleSessionCardClick(event, session.viewerId)}
+                      onKeyDown={(event) => {
+                        if (!workspaceId) return
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault()
+                          setSelectedViewerIds([])
+                          setSelectionAnchorViewerId(session.viewerId)
+                          navigate(`/workspace/${workspaceId}/sessions/${session.viewerId}`)
+                        }
+                      }}
+                    >
+                      <div className="session-card-topline">
+                        <strong>{session.title}</strong>
+                        <div className="session-card-actions">
+                          {liveSummary?.active ? (
+                            <span
+                              className={`session-live-indicator ${liveSummary.isStreaming ? 'session-live-indicator-working' : 'session-live-indicator-ready'}`}
+                              title={liveSummary.isStreaming ? 'Working' : 'Ready'}
+                            >
+                              {liveSummary.isStreaming ? (
+                                <SpinnerIcon className="icon icon-spin" />
+                              ) : (
+                                <DoneIcon className="icon" />
+                              )}
+                            </span>
+                          ) : null}
+
+                          <button
+                            className="icon-button session-card-archive-inline"
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              void commitArchiveFromList(session)
+                            }}
+                            disabled={isArchiving || Boolean(liveSummary?.isStreaming)}
+                            title={liveSummary?.isStreaming ? 'Wait for the session to finish before archiving.' : 'Archive this session'}
+                            aria-label={`Archive session ${session.title}`}
                           >
-                            {liveSummary.isStreaming ? (
+                            {isArchiving ? (
                               <SpinnerIcon className="icon icon-spin" />
                             ) : (
-                              <DoneIcon className="icon" />
+                              <ArchiveIcon className="icon" />
                             )}
-                          </span>
-                        )
-                      })()}
-                    </div>
-                    <p className="muted session-preview">
-                      {(() => {
-                        const liveSummary = liveSummaryMap.get(session.viewerId)
-                        const isWorking = Boolean(liveSummary?.isStreaming) || (session.userMessageCount > 0 && session.assistantMessageCount === 0)
+                          </button>
+                        </div>
+                      </div>
+                      <p className="muted session-preview">
+                        {(() => {
+                          const isWorking = Boolean(liveSummary?.isStreaming) || (session.userMessageCount > 0 && session.assistantMessageCount === 0)
 
-                        if (isWorking) {
-                          const lastUser = session.lastUserPreview
-                            || (session.previewRole === 'user' ? session.preview : '')
+                          if (isWorking) {
+                            const lastUser = session.lastUserPreview
+                              || (session.previewRole === 'user' ? session.preview : '')
 
-                          return (
-                            <span className="session-preview-working">
-                              {lastUser ? (
+                            return (
+                              <span className="session-preview-working">
+                                {lastUser ? (
+                                  <span className="session-preview-line">
+                                    <UserIcon className="icon icon-inline" />
+                                    <span>{lastUser}</span>
+                                  </span>
+                                ) : null}
                                 <span className="session-preview-line">
-                                  <UserIcon className="icon icon-inline" />
-                                  <span>{lastUser}</span>
+                                  <AgentIcon className="icon icon-inline" />
+                                  <span>working...</span>
                                 </span>
-                              ) : null}
-                              <span className="session-preview-line">
-                                <AgentIcon className="icon icon-inline" />
-                                <span>working...</span>
                               </span>
-                            </span>
-                          )
-                        }
+                            )
+                          }
 
-                        if (session.previewRole === 'user') {
-                          return (
-                            <>
-                              <UserIcon className="icon icon-inline" />
-                              <span>{session.preview}</span>
-                            </>
-                          )
-                        }
+                          if (session.previewRole === 'user') {
+                            return (
+                              <>
+                                <UserIcon className="icon icon-inline" />
+                                <span>{session.preview}</span>
+                              </>
+                            )
+                          }
 
-                        if (session.previewRole === 'assistant') {
-                          return (
-                            <>
-                              <AgentIcon className="icon icon-inline" />
-                              <span>{session.preview}</span>
-                            </>
-                          )
-                        }
+                          if (session.previewRole === 'assistant') {
+                            return (
+                              <>
+                                <AgentIcon className="icon icon-inline" />
+                                <span>{session.preview}</span>
+                              </>
+                            )
+                          }
 
-                        return <span>{session.preview}</span>
-                      })()}
-                    </p>
-                    <div className="session-meta-row muted">
-                      <span>{formatDate(session.updatedAt)}</span>
-                      <span>{session.messageCount} msgs</span>
-                      {session.hasBranches && <span>branched</span>}
+                          return <span>{session.preview}</span>
+                        })()}
+                      </p>
+                      <div className="session-meta-row muted">
+                        <span>{formatDate(session.updatedAt)}</span>
+                        <span>{session.messageCount} msgs</span>
+                        {session.hasBranches && <span>branched</span>}
+                      </div>
                     </div>
-                  </button>
-                ))
+                  )
+                })
               )}
 
               <button
                 className="session-add-card"
                 onClick={() => {
+                  setSelectedViewerIds([])
+                  setSelectionAnchorViewerId(null)
                   setSelectedSession(null)
                   setRuntime(null)
                   navigate(`/workspace/${workspaceId}`)
@@ -1537,6 +2117,21 @@ export function WorkspacePage() {
               </button>
             </div>
           </aside>
+
+          <div
+            className="session-list-resizer"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize session list"
+            aria-valuemin={MIN_SESSION_LIST_WIDTH}
+            aria-valuemax={920}
+            aria-valuenow={Math.round(sessionListWidth)}
+            tabIndex={0}
+            title="Drag to resize the session list (double-click or press Enter to reset)."
+            onPointerDown={handleSessionListResizerPointerDown}
+            onDoubleClick={resetSessionListWidth}
+            onKeyDown={handleSessionListResizerKeyDown}
+          />
 
           <section className="session-viewer-panel card">
             {detailLoading ? (
@@ -1677,30 +2272,35 @@ export function WorkspacePage() {
                       })
                     )}
 
-                    {runtime?.isStreaming && liveThinkingText && (
-                      <div aria-live="polite">
-                        <SessionEntry
-                          entry={{
-                            id: '__live-thinking__',
-                            entryType: 'thinking',
-                            role: 'thinking',
-                            text: liveThinkingText,
-                          }}
-                          defaultExpanded={thinkingExpandedByDefault}
-                        />
-                      </div>
-                    )}
-
-                    {runtime?.isStreaming && liveToolCalls.length > 0 && (
+                    {runtime?.isStreaming && liveEntries.length > 0 && (
                       <div className="session-live-tools" aria-live="polite">
-                        {liveToolCalls.map((toolCall) => (
-                          <article className={`session-entry entry-tool session-live-tool`} key={toolCall.toolCallId}>
-                            <div className="session-entry-header">
-                              <span className="session-entry-role">tool</span>
-                              <span className="session-entry-time">{toolCall.toolName}{toolCall.isComplete ? '' : ' (running)'}</span>
-                            </div>
-                            <SessionEntryBody text={toolCall.output || ''} defaultExpanded={toolOutputsExpandedByDefault} />
-                          </article>
+                        {liveEntries.map((entry) => (
+                          entry.kind === 'thinking'
+                            ? (
+                                <SessionEntry
+                                  key={entry.id}
+                                  entry={{
+                                    id: entry.id,
+                                    entryType: 'thinking',
+                                    role: 'thinking',
+                                    text: entry.text,
+                                  }}
+                                  defaultExpanded={thinkingExpandedByDefault}
+                                />
+                              )
+                            : (
+                                <article className={`session-entry entry-tool session-live-tool`} key={entry.id}>
+                                  <div className="session-entry-header">
+                                    <span className="session-entry-role">tool</span>
+                                    <span className="session-entry-time">{entry.toolName}{entry.isComplete ? '' : ' (running)'}</span>
+                                  </div>
+                                  <SessionEntryBody
+                                    text={entry.output || ''}
+                                    role="toolResult"
+                                    defaultExpanded={toolOutputsExpandedByDefault}
+                                  />
+                                </article>
+                              )
                         ))}
                       </div>
                     )}
