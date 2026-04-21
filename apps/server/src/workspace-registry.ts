@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { BIRDSEYE_WORKSPACES_PATH, defaultWorkspaceNameFromPath, ensureBirdseyeHome } from './config.js'
 import { deleteWorkspaceIcon, getWorkspaceIconMeta } from './workspace-icons.js'
+import { getWorkspaceGitInfo } from './workspace-git.js'
 import type { WorkspaceRecord } from './types.js'
 
 interface PersistedWorkspaceRecord {
@@ -35,12 +36,19 @@ function writeRegistry(records: PersistedWorkspaceRecord[]): void {
   writeFileSync(BIRDSEYE_WORKSPACES_PATH, `${JSON.stringify(records, null, 2)}\n`, 'utf8')
 }
 
-async function toWorkspaceRecord(record: PersistedWorkspaceRecord): Promise<WorkspaceRecord> {
+async function toWorkspaceRecord(
+  record: PersistedWorkspaceRecord,
+  options: { includeGit?: boolean } = {},
+): Promise<WorkspaceRecord> {
   const iconMeta = await getWorkspaceIconMeta(record.id)
+  const exists = existsSync(record.path)
 
   return {
     ...record,
-    exists: existsSync(record.path),
+    exists,
+    git: options.includeGit && exists
+      ? await getWorkspaceGitInfo(record.path)
+      : undefined,
     iconUrl: iconMeta ? `/api/workspaces/${record.id}/icon` : undefined,
     iconUpdatedAt: iconMeta?.updatedAt,
   }
@@ -48,7 +56,7 @@ async function toWorkspaceRecord(record: PersistedWorkspaceRecord): Promise<Work
 
 export async function listWorkspaces(): Promise<WorkspaceRecord[]> {
   const records = readRegistry()
-  const workspaces = await Promise.all(records.map(toWorkspaceRecord))
+  const workspaces = await Promise.all(records.map((record) => toWorkspaceRecord(record)))
 
   return workspaces.sort((a, b) => {
     const aTime = a.lastOpenedAt ?? a.createdAt
@@ -60,7 +68,7 @@ export async function listWorkspaces(): Promise<WorkspaceRecord[]> {
 export async function getWorkspace(id: string): Promise<WorkspaceRecord | null> {
   const record = readRegistry().find((item) => item.id === id)
   if (!record) return null
-  return toWorkspaceRecord(record)
+  return toWorkspaceRecord(record, { includeGit: true })
 }
 
 export async function createWorkspace(inputPath: string, inputName?: string): Promise<WorkspaceRecord> {

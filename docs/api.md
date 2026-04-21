@@ -212,6 +212,20 @@ Returns the created workspace.
 
 Returns a workspace and touches `lastOpenedAt`.
 
+When the workspace path exists, the response may also include Git metadata:
+
+```json
+{
+  "git": {
+    "isRepo": true,
+    "branch": "main",
+    "rootPath": "/absolute/repo/root"
+  }
+}
+```
+
+If the workspace is not inside a Git worktree, `git.isRepo` is `false`.
+
 ### DELETE `/api/workspaces/:workspaceId`
 
 Deletes the workspace registration.

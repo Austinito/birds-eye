@@ -113,6 +113,24 @@ app.get('/api/models', async (_req, res) => {
   }
 })
 
+app.get('/api/sessions/live', async (_req, res) => {
+  try {
+    const workspaces = await listWorkspaces()
+    const summaries = workspaces.flatMap((workspace) => (
+      listLiveSessionSummaries(workspace.path).map((summary) => ({
+        ...summary,
+        workspaceId: workspace.id,
+        workspaceName: workspace.name,
+      }))
+    ))
+
+    res.json(summaries)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to load live session summaries'
+    res.status(400).json({ error: message })
+  }
+})
+
 app.get('/api/workspaces/:workspaceId/sessions/live', async (req, res) => {
   const workspace = await getWorkspace(req.params.workspaceId)
   if (!workspace) {

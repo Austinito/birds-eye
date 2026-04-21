@@ -41,6 +41,9 @@ export function SettingsPage() {
   const [defaultModelKey, setDefaultModelKey] = useState<string>('')
   const [defaultThinkingLevel, setDefaultThinkingLevel] = useState<string>('')
 
+  const [notifyOnWorkComplete, setNotifyOnWorkComplete] = useState(false)
+  const [notifyOnlyWhenNotViewing, setNotifyOnlyWhenNotViewing] = useState(true)
+
   const selectedModel = useMemo(
     () => modelOptions.find((option) => option.key === defaultModelKey) ?? null,
     [modelOptions, defaultModelKey],
@@ -71,6 +74,9 @@ export function SettingsPage() {
         setDefaultWorkspace(settingsResponse.defaultWorkspace ?? '')
         setDefaultModelKey(settingsResponse.defaultModelKey ?? '')
         setDefaultThinkingLevel(settingsResponse.defaultThinkingLevel ?? '')
+
+        setNotifyOnWorkComplete(Boolean(settingsResponse.notifyOnWorkComplete))
+        setNotifyOnlyWhenNotViewing(settingsResponse.notifyOnlyWhenNotViewing ?? true)
       })
       .catch((err) => {
         if (!cancelled) {
@@ -115,6 +121,8 @@ export function SettingsPage() {
         defaultWorkspace: normalizeWorkspaceSelection(defaultWorkspace),
         defaultModelKey: normalizeModelKeySelection(defaultModelKey),
         defaultThinkingLevel: normalizeThinkingSelection(defaultThinkingLevel),
+        notifyOnWorkComplete,
+        notifyOnlyWhenNotViewing,
       }
 
       const saved = await api.saveSettings(payload)
@@ -122,7 +130,10 @@ export function SettingsPage() {
       setDefaultWorkspace(saved.defaultWorkspace ?? '')
       setDefaultModelKey(saved.defaultModelKey ?? '')
       setDefaultThinkingLevel(saved.defaultThinkingLevel ?? '')
+      setNotifyOnWorkComplete(Boolean(saved.notifyOnWorkComplete))
+      setNotifyOnlyWhenNotViewing(saved.notifyOnlyWhenNotViewing ?? true)
       setSuccess('Saved')
+      window.dispatchEvent(new Event('birdseye-settings-changed'))
 
       setTimeout(() => setSuccess(''), 1200)
     } catch (err) {
@@ -138,6 +149,24 @@ export function SettingsPage() {
         <div className="loading-card card">Loading settings…</div>
       </main>
     )
+  }
+
+  const notificationsSupported = typeof window !== 'undefined' && 'Notification' in window
+
+  const requestNotificationPermission = async () => {
+    if (!notificationsSupported) return
+    try {
+      await Notification.requestPermission()
+    } catch {
+      // ignore
+    }
+  }
+
+  const handleNotifyToggle = (checked: boolean) => {
+    setNotifyOnWorkComplete(checked)
+    if (checked) {
+      void requestNotificationPermission()
+    }
   }
 
   return (
@@ -216,6 +245,32 @@ export function SettingsPage() {
             </select>
             <span className="settings-hint muted">
               Reasoning models only. Non-reasoning models use "off".
+            </span>
+          </label>
+
+          <label className="settings-field">
+            <span className="settings-label">Notifications</span>
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={notifyOnWorkComplete}
+                onChange={(e) => handleNotifyToggle(e.target.checked)}
+                disabled={!notificationsSupported}
+              />
+              <span>Notify me when a live session finishes working</span>
+            </label>
+            <label className="checkbox-row spacer-top-sm">
+              <input
+                type="checkbox"
+                checked={notifyOnlyWhenNotViewing}
+                onChange={(e) => setNotifyOnlyWhenNotViewing(e.target.checked)}
+                disabled={!notifyOnWorkComplete}
+              />
+              <span>Only when I’m not viewing that session</span>
+            </label>
+            <span className="settings-hint muted">
+              Uses browser notifications. You may need to allow notifications for this site.
+              {!notificationsSupported ? ' (Not supported in this browser.)' : ''}
             </span>
           </label>
         </div>

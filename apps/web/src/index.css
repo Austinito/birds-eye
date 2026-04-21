@@ -743,6 +743,13 @@ ul {
   font-size: 1.2rem;
 }
 
+.workspace-summary-meta-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .workspace-summary-separator,
 .workspace-summary-meta {
   color: var(--muted);

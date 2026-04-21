@@ -791,30 +791,44 @@ export function WorkspacePage() {
 
   const loadSessions = async (targetWorkspaceId: string) => {
     const sessionsResponse = await api.getSessions(targetWorkspaceId)
-    setSessions(sessionsResponse)
+
+    // Avoid clobbering the active workspace view with a stale async response.
+    if (activeWorkspaceIdRef.current === targetWorkspaceId) {
+      setSessions(sessionsResponse)
+    }
+
     return sessionsResponse
   }
 
   const loadWorkspace = async () => {
     if (!workspaceId) return
 
+    const targetWorkspaceId = workspaceId
+
     setLoading(true)
     setError('')
     try {
       const [workspaceResponse, sessionsResponse, modelOptionsResponse, settingsResponse] = await Promise.all([
-        api.getWorkspace(workspaceId),
-        api.getSessions(workspaceId),
+        api.getWorkspace(targetWorkspaceId),
+        api.getSessions(targetWorkspaceId),
         api.getAvailableModels(),
         api.getSettings(),
       ])
+
+      if (activeWorkspaceIdRef.current !== targetWorkspaceId) return
+
       setWorkspace(workspaceResponse)
       setSessions(sessionsResponse)
       setModelOptions(modelOptionsResponse)
       setSettings(settingsResponse)
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      if (activeWorkspaceIdRef.current === targetWorkspaceId) {
+        setError(err instanceof Error ? err.message : String(err))
+      }
     } finally {
-      setLoading(false)
+      if (activeWorkspaceIdRef.current === targetWorkspaceId) {
+        setLoading(false)
+      }
     }
   }
 
@@ -1852,6 +1866,13 @@ export function WorkspacePage() {
   const headerIconSrc = workspace ? workspaceIconSrc(workspace) : null
   const headerHue = workspace ? workspaceHueFromName(workspace.name) : 0
   const headerInitials = workspace ? workspaceInitials(workspace.name) : ''
+  const workspaceGitLabel = workspace?.git?.isRepo
+    ? workspace.git.branch
+      ? `Branch: ${workspace.git.branch}`
+      : workspace.git.detachedHead
+        ? `Detached: ${workspace.git.detachedHead}`
+        : 'Git repo'
+    : null
 
   if (loading) {
     return (
@@ -1885,10 +1906,17 @@ export function WorkspacePage() {
               ) : null}
               <h1>{workspaceName}</h1>
             </div>
-            <span className="workspace-summary-separator">|</span>
-            <p className="workspace-summary-meta">
-              Sessions: <span className="workspace-session-count">{sessions.length}</span>
-            </p>
+            <div className="workspace-summary-meta-group">
+              <p className="workspace-summary-meta">
+                Sessions: <span className="workspace-session-count">{sessions.length}</span>
+              </p>
+              {workspaceGitLabel && (
+                <>
+                  <span className="workspace-summary-separator">|</span>
+                  <p className="workspace-summary-meta">{workspaceGitLabel}</p>
+                </>
+              )}
+            </div>
           </div>
 
           <div className="workspace-summary-actions">

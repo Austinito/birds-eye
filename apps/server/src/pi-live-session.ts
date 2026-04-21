@@ -82,6 +82,7 @@ export function listLiveSessionSummaries(workspacePath: string): LiveSessionSumm
       viewerId: runtime.viewerId,
       active: true,
       isStreaming: runtime.session.isStreaming,
+      sessionName: runtime.session.sessionName || undefined,
     }))
 }
 

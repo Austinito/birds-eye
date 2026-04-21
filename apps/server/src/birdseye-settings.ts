@@ -16,6 +16,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
+
 export function loadBirdseyeSettings(): BirdseyeSettings | null {
   ensureBirdseyeHome()
 
@@ -96,6 +97,28 @@ export function normalizeBirdseyeSettingsPayload(
       normalized.defaultThinkingLevel = raw as ThinkingLevel
     } else {
       return { ok: false, error: 'Invalid defaultThinkingLevel value' }
+    }
+  }
+
+  if ('notifyOnWorkComplete' in payload) {
+    const raw = payload.notifyOnWorkComplete
+    if (raw === null || raw === undefined) {
+      delete (normalized as any).notifyOnWorkComplete
+    } else if (typeof raw === 'boolean') {
+      normalized.notifyOnWorkComplete = raw
+    } else {
+      return { ok: false, error: 'Invalid notifyOnWorkComplete value' }
+    }
+  }
+
+  if ('notifyOnlyWhenNotViewing' in payload) {
+    const raw = payload.notifyOnlyWhenNotViewing
+    if (raw === null || raw === undefined) {
+      delete (normalized as any).notifyOnlyWhenNotViewing
+    } else if (typeof raw === 'boolean') {
+      normalized.notifyOnlyWhenNotViewing = raw
+    } else {
+      return { ok: false, error: 'Invalid notifyOnlyWhenNotViewing value' }
     }
   }
 

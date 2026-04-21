@@ -9,7 +9,20 @@ export interface BirdseyeSettings {
   defaultModelKey?: string
   /** Default thinking level for new live sessions */
   defaultThinkingLevel?: ThinkingLevel
+
+  /** Show a browser notification when a live session finishes working. */
+  notifyOnWorkComplete?: boolean
+  /** Only notify when you are not currently viewing that specific session. */
+  notifyOnlyWhenNotViewing?: boolean
+
   [key: string]: unknown
+}
+
+export interface WorkspaceGitInfo {
+  isRepo: boolean
+  branch?: string
+  detachedHead?: string
+  rootPath?: string
 }
 
 export interface Workspace {
@@ -19,6 +32,7 @@ export interface Workspace {
   createdAt: string
   lastOpenedAt?: string
   exists: boolean
+  git?: WorkspaceGitInfo
   /** When present, a user-provided workspace icon is available at this URL. */
   iconUrl?: string
   /** Used for cache-busting workspace icon requests. */
@@ -140,6 +154,13 @@ export interface LiveSessionSummary {
   viewerId: string
   active: boolean
   isStreaming: boolean
+  /** Optional: best-effort display name for the session (live runtime only). */
+  sessionName?: string
+}
+
+export interface GlobalLiveSessionSummary extends LiveSessionSummary {
+  workspaceId: string
+  workspaceName: string
 }
 
 export interface LiveSessionStreamEvent {

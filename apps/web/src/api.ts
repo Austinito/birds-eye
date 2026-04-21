@@ -8,6 +8,7 @@ import type {
   ModelOption,
   PiMigrationStatus,
   LiveSessionSummary,
+  GlobalLiveSessionSummary,
   QueueLiveSessionMessageResponse,
   RenameSessionRequest,
   SendLiveSessionMessageResponse,
@@ -100,6 +101,10 @@ export const api = {
 
   getLiveSessionSummaries(workspaceId: string): Promise<LiveSessionSummary[]> {
     return fetch(`/api/workspaces/${workspaceId}/sessions/live`).then((response) => parseJson<LiveSessionSummary[]>(response))
+  },
+
+  getGlobalLiveSessionSummaries(): Promise<GlobalLiveSessionSummary[]> {
+    return fetch('/api/sessions/live').then((response) => parseJson<GlobalLiveSessionSummary[]>(response))
   },
 
   createLiveSession(workspaceId: string, options: { modelKey?: string; thinkingLevel?: ThinkingLevel }) {
